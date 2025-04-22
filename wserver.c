@@ -1,6 +1,11 @@
 #include <stdio.h>
+#include <stdlib.h>    // for atoi(), exit()
+#include <unistd.h>    // for getopt(), optarg, getpid()
+#include <sys/socket.h>
+#include <netinet/in.h>
 #include "request.h"
 #include "io_helper.h"
+
 
 char default_root[] = ".";
 
@@ -30,6 +35,9 @@ int main(int argc, char *argv[]) {
 
     // now, get to work
     int listen_fd = open_listen_fd_or_die(port);
+    printf("DEBUG [%d]: requested port %d, actually listening on port %d\n",
+      getpid(), port, port);
+      fflush(stdout);
     while (1) {
       struct sockaddr_in client_addr;
       int client_len = sizeof(client_addr);
