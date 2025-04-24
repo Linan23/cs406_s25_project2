@@ -38,6 +38,7 @@ int main(int argc, char *argv[]) {
     printf("DEBUG [%d]: requested port %d, actually listening on port %d\n",
       getpid(), port, port);
       fflush(stdout);
+      
     while (1) {
       struct sockaddr_in client_addr;
       int client_len = sizeof(client_addr);

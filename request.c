@@ -154,6 +154,16 @@ void request_handle(int fd) {
     sscanf(buf, "%s %s %s", method, uri, version);
     printf("method:%s uri:%s version:%s\n", method, uri, version);
     
+    //For Security Purposes(2.3) by forbidding any ".." in the url
+
+    if (strstr(uri, "..")) {
+      request_error(fd, uri,
+                    "403", "Forbidden",
+                    "Parent-directory (..) access not allowed");
+      return;
+  }
+
+
     if (strcasecmp(method, "GET")) {
       request_error(fd, method, "501", "Not Implemented", "server does not implement this method");
       return;
