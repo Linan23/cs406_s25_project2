@@ -1,26 +1,33 @@
-# An admittedly primitive Makefile
-# To compile, type "make" or make "all"
-# To remove files, type "make clean"
+.PHONY: all clean
 
-CC = gcc
-CFLAGS = -Wall
-OBJS = wserver.o wclient.o request.o io_helper.o 
+CC       = gcc
+CFLAGS   = -Wall
 
-.SUFFIXES: .c .o 
+# Object files for each program
+OBJS     = wserver.o request.o io_helper.o
+COBJS    = wclient.o io_helper.o
+SQL_OBJS = sql.o blockio.o io_helper.o
 
-all: wserver wclient spin.cgi
+.SUFFIXES: .c .o
 
-wserver: wserver.o request.o io_helper.o
-	$(CC) $(CFLAGS) -o wserver wserver.o request.o io_helper.o 
+# Build all programs
+all: wserver wclient spin.cgi sql.cgi
 
-wclient: wclient.o io_helper.o
-	$(CC) $(CFLAGS) -o wclient wclient.o io_helper.o
+wserver: $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $(OBJS)
+
+wclient: $(COBJS)
+	$(CC) $(CFLAGS) -o $@ $(COBJS)
 
 spin.cgi: spin.c
-	$(CC) $(CFLAGS) -o spin.cgi spin.c
+	$(CC) $(CFLAGS) -o $@ spin.c
 
-.c.o:
-	$(CC) $(CFLAGS) -o $@ -c $<
+sql.cgi: $(SQL_OBJS)
+	$(CC) $(CFLAGS) -o $@ $(SQL_OBJS)
+
+# Generic rule to compile .c into .o
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	-rm -f $(OBJS) wserver wclient spin.cgi
+	-rm -f *.o wserver wclient spin.cgi sql.cgi foo.schema foo.data
