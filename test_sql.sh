@@ -29,6 +29,7 @@ check "already exists"                "CREATE TABLE foo(id:smallint,title:char(1
 check "Inserted into <b>foo</b>"      "INSERT INTO foo VALUES(1,Hello)"
 check "does not exist"                "INSERT INTO bar VALUES(1,X)"
 
+
 # 3) SELECT
 check "<th>id</th><th>title</th>"     "SELECT id,title FROM foo WHERE id<5"
 check "does not exist"                "SELECT id FROM baz WHERE id<5"

@@ -92,6 +92,7 @@ int main()
     char qs_buf[MAXQS];
     url_decode(qs_buf, raw_qs);
     char *qs = qs_buf;
+    
 
     // decoded commands, should turn case insensitive using strncasecmp
     if (strncasecmp(qs, "CREATE TABLE ", 13) == 0)
@@ -100,7 +101,7 @@ int main()
             qs[i] = toupper((unsigned char)qs[i]); // turn into upper case
         handle_create(qs);
     }
-    else if (strncasecmp(qs, "INSERT ", 7) == 0)
+    else if (strncasecmp(qs, "INSERT INTO ", 12) == 0)
     {
         for (int i = 0; i < 7; i++)
             qs[i] = toupper((unsigned char)qs[i]);
@@ -118,7 +119,7 @@ int main()
             qs[i] = toupper((unsigned char)qs[i]);
         handle_update(qs);
     }
-    else if (strncasecmp(qs, "DELETE ", 7) == 0)
+    else if (strncasecmp(qs, "DELETE FROM", 11) == 0)
     {
         for (int i = 0; i < 7; i++)
             qs[i] = toupper((unsigned char)qs[i]);
@@ -126,7 +127,7 @@ int main()
     }
     else
     {
-        printf("<p>ERROR: unknown command</p>\n");
+        printf("<p>ERROR: unknown command</p> %s\n",qs);
     }
 
     return 0;
@@ -137,13 +138,21 @@ void handle_create(char *qs)
 {
     // Parse name and cols: "CREATE TABLE name(col:type, ...)"
     char tbl[64], cols[512];
-    if (sscanf(qs, "CREATE TABLE %63[^ (](%511[^)])",tbl, cols) != 2) // format before was wrong so it didnt take the mixed cases
+    if (sscanf(qs, " CREATE TABLE %63[^(] (%511[^)])",tbl, cols) != 2) // format before was wrong so it didnt take the mixed cases
     {
-        printf("<p>ERROR: bad CREATE syntax</p>\n");
+        printf("<p>ERROR: bad CREATE syntax</p>%s\n",qs);
         return;
     }
 
     // build schema filename
+
+    //getting rid of the whitespace between filename and .schema
+    
+    size_t len = strlen(tbl);
+    if (len > 0 && tbl[len - 1] == ' ') {
+    tbl[len - 1] = '\0';  
+    }
+
     char schemafile[80];
     snprintf(schemafile, sizeof(schemafile), "%s.schema", tbl);
 
@@ -233,11 +242,17 @@ void handle_select(char *qs)
 {
     // ie "SELECT col1,col2 FROM name WHERE col3<100"
     char cols[128], tbl[64], cond[128];
+    //just checking those with a where clause for now 
     if (sscanf(qs, "SELECT %127[^ ] FROM %63s WHERE %127[^\r\n]", cols, tbl, cond) != 3)
     {
-        printf("<p>ERROR: bad SELECT</p>");
+        printf("<p>ERROR: bad SELECT</p> %s\n",qs);
         return;
     }
+
+/*trying to make another sscanf but this time of form SELECT * FROM 
+*/
+
+
 
     printf("<table><tr>");
     // header
@@ -259,6 +274,32 @@ void handle_select(char *qs)
         exit(1);
     }
 
+
+    //trying to find the right column to look at 
+    char col_1[128],op[3], comp[64];
+    if(sscanf(cond, "%127[^<=>]%2[<=>]%63s",col_1, op, comp)!=3){
+        printf("<p>ERROR: bad SELECT in the second scan f for where</p> %s\n",qs);
+        return;
+    } 
+    //trying to find the column in our original parsed query 
+    // that we are looking for 
+    int index=0;
+    char colsCopy[128];
+    strcpy(colsCopy,cols);
+
+    char *col = strtok(colsCopy, ","); 
+    int i=0;
+    //iterate over the columns find one matching condition 
+    while(col!=NULL){
+        if(strcmp(col,col_1)==0){
+              index =i;
+              break;
+        }   
+        col = strtok(colsCopy, ",");
+    }
+
+
+
     for (int b = 0; b != -1; b = get_next_block(datafile, b))
     {
         // read block by block
@@ -275,11 +316,12 @@ void handle_select(char *qs)
         for (char *f = strtok(tmp, "|;"); f; f = strtok(NULL, "|;"))
             fields[nf++] = f;
 
+            //need to change this make it index instead of hardcode
         // WHERE on field #2
-        int v = atoi(fields[2]);
-        if (strstr(cond, "<") && v >= atoi(strchr(cond, '<') + 1))
+        int v = atoi(fields[index]);
+        if (strstr(op, "<") && v >= atoi(strchr(op, '<') + 1))
             continue;
-        if (strstr(cond, ">") && v <= atoi(strchr(cond, '>') + 1))
+        if (strstr(op, ">") && v <= atoi(strchr(op, '>') + 1))
             continue;
 
         printf("<tr>");
@@ -304,7 +346,7 @@ void handle_update(char *qs)
     // split "col=value" into col and value
     char *eq = strchr(setp, '=');
     *eq = '\0';
-    char *col = setp;
+    //char *col = setp;
     char *val = eq + 1;
 
     char datafile[80];
