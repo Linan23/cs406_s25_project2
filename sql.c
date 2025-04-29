@@ -67,8 +67,7 @@ int main()
     {
         handle_create(qs);
     }
-    else if (strncmp(qs, "INSERT ", 7) == 0)
-    else if (strncasecmp(qs, "INSERT INTO ", 12) == 0)
+    else if (strncmp(qs, "INSERT ", 7) == 0 || strncasecmp(qs, "INSERT INTO ", 12) == 0)
     {
         handle_insert(qs);
     }
@@ -80,8 +79,7 @@ int main()
     {
         handle_update(qs);
     }
-    else if (strncmp(qs, "DELETE ", 7) == 0)
-    else if (strncasecmp(qs, "DELETE FROM", 11) == 0)
+    else if (strncmp(qs, "DELETE ", 7) == 0 || strncasecmp(qs, "DELETE FROM", 11) == 0)
     {
         handle_delete(qs);
     }
