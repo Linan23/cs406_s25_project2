@@ -31,10 +31,17 @@ echo "=== CREATE TABLE tests ==="
 check "Created table <b>movies</b>" "CREATE TABLE movies(id:smallint,title:char(20),length:integer)"
 check "ERROR: table <b>movies</b> already exists" "CREATE TABLE movies(id:smallint,title:char(20),length:integer)"
 
+<<<<<<< HEAD
 echo
 echo "=== INSERT tests ==="
 check "Inserted into <b>movies</b>" "INSERT INTO movies VALUES(1,Avatar,162)"
 check "Inserted into <b>movies</b>" "INSERT INTO movies VALUES(2,Titanic,195)"
+=======
+
+# 3) SELECT
+check "<th>id</th><th>title</th>"     "SELECT id,title FROM foo WHERE id<5"
+check "does not exist"                "SELECT id FROM baz WHERE id<5"
+>>>>>>> refs/remotes/origin/main
 
 echo
 echo "=== SELECT tests ==="
