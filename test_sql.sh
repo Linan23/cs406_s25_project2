@@ -43,6 +43,22 @@ check "<td>Avatar</td>" "SELECT id,title FROM movies WHERE id=1"
 check "<td>195</td>" "SELECT id,length FROM movies WHERE id=2"
 
 echo
+echo "=== BLOCK OVERFLOW TEST ==="
+
+# Insert 7 records to force a new block (6 fit in one)
+check "Inserted into <b>movies</b>" "INSERT INTO movies VALUES(10,Movie10,100)"
+check "Inserted into <b>movies</b>" "INSERT INTO movies VALUES(11,Movie11,101)"
+check "Inserted into <b>movies</b>" "INSERT INTO movies VALUES(12,Movie12,102)"
+check "Inserted into <b>movies</b>" "INSERT INTO movies VALUES(13,Movie13,103)"
+check "Inserted into <b>movies</b>" "INSERT INTO movies VALUES(14,Movie14,104)"
+check "Inserted into <b>movies</b>" "INSERT INTO movies VALUES(15,Movie15,105)"
+check "Inserted into <b>movies</b>" "INSERT INTO movies VALUES(16,Movie16,106)"  # should land in new block
+
+# Verify earliest and latest insert made it
+check "<td>Movie10</td>" "SELECT title FROM movies WHERE id=10"
+check "<td>Movie16</td>" "SELECT title FROM movies WHERE id=16"
+
+echo
 echo "=== UPDATE tests ==="
 check "Update done on <b>movies</b>" "UPDATE movies SET title=Titanic3D WHERE id=2"
 check "<td>Titanic3D</td>" "SELECT id,title FROM movies WHERE id=2"
@@ -107,6 +123,7 @@ check "ERROR: table <b>nosuch</b> does not exist" "UPDATE nosuch SET title=Y WHE
 check "ERROR: bad UPDATE syntax" "UPDATE movies SET title Titanic WHERE id=1"
 
 # DELETE tests
+
 check "Deleted matching rows in <b>movies</b>" "DELETE FROM movies WHERE id=2"
 resp=$(curl -s "${BASE}$(urlencode "SELECT id FROM movies WHERE id=2")")
 if echo "$resp" | grep -q "<td>"; then

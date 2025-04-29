@@ -11,6 +11,8 @@
 #define MAXSQL 1024
 #define MAXTOK 256
 
+#define RECORD_SIZE 43
+
 void handle_create(char *qs);
 void handle_insert(char *qs);
 void handle_select(char *qs);
@@ -62,23 +64,23 @@ int main()
     char *qs = qs_buf;
 
     // decoded commands, should turn case insensitive using strncasecmp
-    if (strncmp(qs, "CREATE TABLE ", 13) == 0)
+    if (strncasecmp(qs, "CREATE TABLE ", 13) == 0)
     {
         handle_create(qs);
     }
-    else if (strncmp(qs, "INSERT ", 7) == 0 || strncasecmp(qs, "INSERT INTO ", 12) == 0)
+    else if (strncasecmp(qs, "INSERT INTO ", 12) == 0)
     {
         handle_insert(qs);
     }
-    else if (strncmp(qs, "SELECT ", 7) == 0)
+    else if (strncasecmp(qs, "SELECT ", 7) == 0)
     {
         handle_select(qs);
     }
-    else if (strncmp(qs, "UPDATE ", 7) == 0)
+    else if (strncasecmp(qs, "UPDATE ", 7) == 0)
     {
         handle_update(qs);
     }
-    else if (strncmp(qs, "DELETE ", 7) == 0 || strncasecmp(qs, "DELETE FROM", 11) == 0)
+    else if (strncasecmp(qs, "DELETE FROM", 11) == 0)
     {
         handle_delete(qs);
     }
@@ -246,16 +248,18 @@ void handle_create(char *qs)
     set_next_block(datafile, b2, -1);
 }
 
+// Insert
+
 void handle_insert(char *qs) {
     char tbl[64], vals[512];
-    
-    // parsing
+
+    // parse input
     if (sscanf(qs, "INSERT INTO %63[^ ] VALUES(%511[^)])", tbl, vals) != 2) {
         printf("<p>ERROR: bad INSERT syntax</p>\n");
         return;
     }
 
-    // Confirm the table exists
+    // confirm table exists
     char datafile[80];
     snprintf(datafile, sizeof(datafile), "%s.data", tbl);
     struct stat st;
@@ -264,7 +268,7 @@ void handle_insert(char *qs) {
         return;
     }
 
-    // Check comma counts 
+    // check field count, should only be 2 commas for 3 values
     int commas = 0;
     for (char *p = vals; *p; p++) {
         if (*p == ',') commas++;
@@ -274,7 +278,7 @@ void handle_insert(char *qs) {
         return;
     }
 
-    // Parse the fields
+    // parse fields
     int id, length;
     char title[128];
     if (sscanf(vals, "%d,%127[^,],%d", &id, title, &length) != 3) {
@@ -282,28 +286,52 @@ void handle_insert(char *qs) {
         return;
     }
 
-    // Format the fields
+    // format record
+    char record[RECORD_SIZE] = {0};
+
     char idstr[5];
     snprintf(idstr, sizeof(idstr), "%04d", id);
+    memcpy(record, idstr, 4);
 
-    char titlestr[31];
-    memset(titlestr, ' ', 30);
-    titlestr[30] = '\0';
-    strncpy(titlestr, title, strlen(title));
+    char titlestr[30];
+    memset(titlestr, ' ', sizeof(titlestr));
+    strncpy(titlestr, title, sizeof(titlestr));
+    memcpy(record + 4, titlestr, 30);
 
     char lengthstr[9];
     snprintf(lengthstr, sizeof(lengthstr), "%08d", length);
+    memcpy(record + 34, lengthstr, 8);
 
-    // Write to block
-    char buf[256] = {0};
-    snprintf(buf, sizeof(buf), "%s%s%s", idstr, titlestr, lengthstr);
+    // scan blocks for empty spot
+    int nblocks = st.st_size / BLOCK_SIZE;
+    int written = 0;
+    for (int b = 1; b < nblocks; b++) {
+        char buf[BLOCK_SIZE];
+        read_block(datafile, b, buf);
 
-    int b = alloc_block(datafile);
-    write_block(datafile, b, buf);
-    set_next_block(datafile, b, -1);
+        for (int off = 0; off + RECORD_SIZE <= BLOCK_SIZE; off += RECORD_SIZE) {
+            if (buf[off] == '\0') {
+                memcpy(buf + off, record, RECORD_SIZE);
+                write_block(datafile, b, buf);
+                written = 1;
+                break;
+            }
+        }
+        if (written) break;
+    }
+
+    // if no space, allocate a new block
+    if (!written) {
+        int b = alloc_block(datafile);
+        char buf[BLOCK_SIZE] = {0};
+        memcpy(buf, record, RECORD_SIZE);
+        write_block(datafile, b, buf);
+        set_next_block(datafile, b, -1);
+    }
 
     printf("<p>Inserted into <b>%s</b></p>\n", tbl);
 }
+
 
 
 
@@ -314,24 +342,18 @@ void handle_select(char *qs) {
     char cols[128], tbl[64], cond[128];
     char header_cols[128], data_cols[128];
 
-    // Parse this: SELECT col1,col2[...] FROM table WHERE cond
-    if (sscanf(qs, "SELECT %127[^ ] FROM %63[^ ] WHERE %127[^\r\n]",
-               cols, tbl, cond) != 3) {
+    if (sscanf(qs, "SELECT %127[^ ] FROM %63[^ ] WHERE %127[^\r\n]", cols, tbl, cond) != 3) {
         printf("<p>ERROR: bad SELECT syntax</p>\n");
         return;
     }
-
-    // select all
 
     if (strcmp(cols, "*") == 0) {
         strcpy(cols, "id,title,length");
     }
 
-    // copies to use because strtok() will destroy them
     strncpy(header_cols, cols, sizeof(header_cols));
     strncpy(data_cols,   cols, sizeof(data_cols));
 
-    // Validate table name
     for (char *p = tbl; *p; p++) {
         if (!isalnum((unsigned char)*p) && *p != '_') {
             printf("<p>ERROR: invalid table name</p>\n");
@@ -339,7 +361,6 @@ void handle_select(char *qs) {
         }
     }
 
-    // Confirm table exists
     char datafile[80];
     snprintf(datafile, sizeof(datafile), "%s.data", tbl);
     struct stat st;
@@ -348,7 +369,6 @@ void handle_select(char *qs) {
         return;
     }
 
-    // Print the header row(<th> )
     printf("<table><tr>");
     char *col = strtok(header_cols, ",");
     while (col) {
@@ -358,7 +378,6 @@ void handle_select(char *qs) {
     }
     printf("</tr>\n");
 
-    // Parse the WHERE clause into field, op, and integer target
     char *op = NULL;
     if (strstr(cond, "!=")) op = "!=";
     else if (strstr(cond, "<")) op = "<";
@@ -368,6 +387,7 @@ void handle_select(char *qs) {
         printf("<p>ERROR: unknown operator</p>\n");
         return;
     }
+
     char field[64], value[64];
     if (strcmp(op, "!=") == 0)
         sscanf(cond, "%63[^!]!=%63s", field, value);
@@ -375,85 +395,77 @@ void handle_select(char *qs) {
         sscanf(cond, "%63[^<>=]%*c%63s", field, value);
     int where_target = atoi(value);
 
-    // check the block amount in the file
     int nblocks = st.st_size / BLOCK_SIZE;
-
-    // Scan blocks
     for (int b = 1; b < nblocks; b++) {
         char buf[BLOCK_SIZE];
         read_block(datafile, b, buf);
 
-        // check empty block
-        if (buf[0] == '\0') continue;
+        for (int offset = 0; offset + 42 <= BLOCK_SIZE; offset += 43) {
+            char idstr[5] = {0};
+            strncpy(idstr, buf + offset, 4);
+            if (idstr[0] == '\0') continue;
 
-        // unpack fixed width fields
-        char idstr[5]     = {0};
-        char titlestr[31] = {0};
-        char lengthstr[9] = {0};
-        strncpy(idstr,     buf,       4);
-        strncpy(titlestr,  buf + 4,  30);
-        strncpy(lengthstr, buf + 34,  8);
-        int id     = atoi(idstr);
-        int length = atoi(lengthstr);
+            char titlestr[31] = {0};
+            char lengthstr[9] = {0};
+            strncpy(titlestr, buf + offset + 4, 30);
+            strncpy(lengthstr, buf + offset + 34, 8);
 
-        // applying where
-        int match = 0;
-        if      (strcmp(field, "id") == 0) {
-            if      (!strcmp(op, "="))  match = (id     == where_target);
-            else if (!strcmp(op, "<"))  match = (id     <  where_target);
-            else if (!strcmp(op, ">"))  match = (id     >  where_target);
-            else if (!strcmp(op, "!=")) match = (id     != where_target);
-        }
-        else if (strcmp(field, "length") == 0) {
-            if      (!strcmp(op, "="))  match = (length == where_target);
-            else if (!strcmp(op, "<"))  match = (length <  where_target);
-            else if (!strcmp(op, ">"))  match = (length >  where_target);
-            else if (!strcmp(op, "!=")) match = (length != where_target);
-        }
-        if (!match) continue;
+            int id = atoi(idstr);
+            int length = atoi(lengthstr);
 
-        // trim spaces off the title
-        for (int i = strlen(titlestr) - 1; i >= 0; i--) {
-            if (titlestr[i] == ' ') titlestr[i] = '\0';
-            else break;
-        }
+            int match = 0;
+            if      (strcmp(field, "id") == 0) {
+                if      (!strcmp(op, "="))  match = (id     == where_target);
+                else if (!strcmp(op, "<"))  match = (id     <  where_target);
+                else if (!strcmp(op, ">"))  match = (id     >  where_target);
+                else if (!strcmp(op, "!=")) match = (id     != where_target);
+            }
+            else if (strcmp(field, "length") == 0) {
+                if      (!strcmp(op, "="))  match = (length == where_target);
+                else if (!strcmp(op, "<"))  match = (length <  where_target);
+                else if (!strcmp(op, ">"))  match = (length >  where_target);
+                else if (!strcmp(op, "!=")) match = (length != where_target);
+            }
 
-        // Print the row
-        printf("<tr>");
-        char data_cols_copy[128];
-        strncpy(data_cols_copy, data_cols, sizeof(data_cols_copy));
-        col = strtok(data_cols_copy, ",");
-        while (col) {
-            while (*col == ' ') col++;
-            if      (!strcmp(col, "id"))     printf("<td>%d</td>",   id);
-            else if (!strcmp(col, "title"))  printf("<td>%s</td>", titlestr);
-            else if (!strcmp(col, "length")) printf("<td>%d</td>", length);
-            col = strtok(NULL, ",");
+            if (!match) continue;
+
+            for (int i = strlen(titlestr) - 1; i >= 0; i--) {
+                if (titlestr[i] == ' ') titlestr[i] = '\0';
+                else break;
+            }
+
+            printf("<tr>");
+            char data_cols_copy[128];
+            strncpy(data_cols_copy, data_cols, sizeof(data_cols_copy));
+            col = strtok(data_cols_copy, ",");
+            while (col) {
+                while (*col == ' ') col++;
+                if      (!strcmp(col, "id"))     printf("<td>%d</td>", id);
+                else if (!strcmp(col, "title"))  printf("<td>%s</td>", titlestr);
+                else if (!strcmp(col, "length")) printf("<td>%d</td>", length);
+                col = strtok(NULL, ",");
+            }
+            printf("</tr>\n");
         }
-        printf("</tr>\n");
     }
-
     printf("</table>\n");
 }
 
-
 // UPDATE 
+
 void handle_update(char *qs) {
     char tbl[64], setp[128], cond[128];
-
     if (sscanf(qs, "UPDATE %63s SET %127[^ ] WHERE %127[^\r\n]", tbl, setp, cond) != 3) {
         printf("<p>ERROR: bad UPDATE syntax</p>\n");
         return;
     }
 
-    // Split SET
     char field[64], newval[128];
     if (sscanf(setp, "%63[^=]=%127s", field, newval) != 2) {
         printf("<p>ERROR: bad SET syntax</p>\n");
         return;
     }
 
-    // Confirm table exists
     char datafile[80];
     snprintf(datafile, sizeof(datafile), "%s.data", tbl);
     struct stat st;
@@ -462,7 +474,6 @@ void handle_update(char *qs) {
         return;
     }
 
-    // Parse WHERE condition
     char *op = NULL;
     if (strstr(cond, "!=")) op = "!=";
     else if (strstr(cond, "<")) op = "<";
@@ -475,64 +486,66 @@ void handle_update(char *qs) {
 
     char where_field[64], where_value[64];
     if (strcmp(op, "!=") == 0)
-        sscanf(cond, "%63[^!]!=%63s", where_field, where_value);
+        sscanf(cond, "%63[^!]!=" "%63s", where_field, where_value);
     else
         sscanf(cond, "%63[^<>=]%*c%63s", where_field, where_value);
 
     int where_target = atoi(where_value);
 
-    // start processing from block 1
     int nblocks = st.st_size / BLOCK_SIZE;
     for (int b = 1; b < nblocks; b++) {
         char buf[BLOCK_SIZE];
         read_block(datafile, b, buf);
 
-        if (buf[0] == '\0') continue;
+        int dirty = 0;
+        for (int offset = 0; offset + 42 <= BLOCK_SIZE; offset += 43) {
+            char idstr[5] = {0};
+            strncpy(idstr, buf + offset, 4);
+            if (idstr[0] == '\0') continue;
 
-        // extract fields
-        char idstr[5] = {0};
-        char titlestr[31] = {0};
-        char lengthstr[9] = {0};
-        strncpy(idstr, buf, 4);
-        strncpy(titlestr, buf + 4, 30);
-        strncpy(lengthstr, buf + 34, 8);
+            char titlestr[31] = {0};
+            char lengthstr[9] = {0};
+            strncpy(titlestr, buf + offset + 4, 30);
+            strncpy(lengthstr, buf + offset + 34, 8);
 
-        int id = atoi(idstr);
-        int length = atoi(lengthstr);
+            int id = atoi(idstr);
+            int length = atoi(lengthstr);
 
-        // where conditions
-        int match = 0;
-        if (strcmp(where_field, "id") == 0) {
-            if      (!strcmp(op, "="))  match = (id == where_target);
-            else if (!strcmp(op, "<"))  match = (id <  where_target);
-            else if (!strcmp(op, ">"))  match = (id >  where_target);
-            else if (!strcmp(op, "!=")) match = (id != where_target);
-        } else if (strcmp(where_field, "length") == 0) {
-            if      (!strcmp(op, "="))  match = (length == where_target);
-            else if (!strcmp(op, "<"))  match = (length <  where_target);
-            else if (!strcmp(op, ">"))  match = (length >  where_target);
-            else if (!strcmp(op, "!=")) match = (length != where_target);
+            int match = 0;
+            if      (strcmp(where_field, "id") == 0) {
+                if      (!strcmp(op, "="))  match = (id     == where_target);
+                else if (!strcmp(op, "<"))  match = (id     <  where_target);
+                else if (!strcmp(op, ">"))  match = (id     >  where_target);
+                else if (!strcmp(op, "!=")) match = (id     != where_target);
+            }
+            else if (strcmp(where_field, "length") == 0) {
+                if      (!strcmp(op, "="))  match = (length == where_target);
+                else if (!strcmp(op, "<"))  match = (length <  where_target);
+                else if (!strcmp(op, ">"))  match = (length >  where_target);
+                else if (!strcmp(op, "!=")) match = (length != where_target);
+            }
+
+            if (!match) continue;
+
+            if (strcmp(field, "title") == 0) {
+                char padded[31];
+                memset(padded, ' ', 30);
+                padded[30] = '\0';
+                strncpy(padded, newval, strlen(newval));
+                memcpy(buf + offset + 4, padded, 30);
+                dirty = 1;
+            } else if (strcmp(field, "length") == 0) {
+                char len_update[9];
+                snprintf(len_update, sizeof(len_update), "%08d", atoi(newval));
+                memcpy(buf + offset + 34, len_update, 8);
+                dirty = 1;
+            } else {
+                printf("<p>ERROR: unknown column %s</p>\n", field);
+                return;
+            }
         }
 
-        if (!match) continue;
-
-        // Update field
-        if (strcmp(field, "title") == 0) {
-            char padded[31];
-            memset(padded, ' ', 30);
-            padded[30] = '\0';
-            strncpy(padded, newval, strlen(newval));
-            memcpy(buf + 4, padded, 30);
-        } else if (strcmp(field, "length") == 0) {
-            char len_update[9];
-            snprintf(len_update, sizeof(len_update), "%08d", atoi(newval));
-            memcpy(buf + 34, len_update, 8);
-        } else {
-            printf("<p>ERROR: unknown column %s</p>\n", field);
-            return;
-        }
-
-        write_block(datafile, b, buf);
+        if (dirty) write_block(datafile, b, buf);
     }
 
     printf("<p>Update done on <b>%s</b></p>\n", tbl);
@@ -540,7 +553,7 @@ void handle_update(char *qs) {
 
 
 
-// DELETE (scanf needs modification)
+// DELETE 
 
 void handle_delete(char *qs) {
     char tbl[64], cond[128];
@@ -559,7 +572,6 @@ void handle_delete(char *qs) {
         return;
     }
 
-    // Parse where
     char *op = NULL;
     if (strstr(cond, "!=")) op = "!=";
     else if (strstr(cond, "<")) op = "<";
@@ -579,47 +591,44 @@ void handle_delete(char *qs) {
     int where_target = atoi(where_value);
 
     int nblocks = st.st_size / BLOCK_SIZE;
-
-    // start from block 1
-    int prev = -1;
-    for (int b = 1; b < nblocks; ) {
+    for (int b = 1; b < nblocks; b++) {
         char buf[BLOCK_SIZE];
+        int dirty = 0;
         read_block(datafile, b, buf);
 
-        if (buf[0] == '\0') {
-            b++;
-            continue;
+        for (int off = 0; off + RECORD_SIZE <= BLOCK_SIZE; off += RECORD_SIZE) {
+            char idstr[5] = {0};
+            strncpy(idstr, buf + off, 4);
+            if (idstr[0] == '\0') continue;
+
+            char lengthstr[9] = {0};
+            strncpy(lengthstr, buf + off + 34, 8);
+
+            int id = atoi(idstr);
+            int length = atoi(lengthstr);
+
+            int match = 0;
+            if (strcmp(where_field, "id") == 0) {
+                if (strcmp(op, "=") == 0) match = (id == where_target);
+                else if (strcmp(op, "<") == 0) match = (id < where_target);
+                else if (strcmp(op, ">") == 0) match = (id > where_target);
+                else if (strcmp(op, "!=") == 0) match = (id != where_target);
+            } else if (strcmp(where_field, "length") == 0) {
+                if (strcmp(op, "=") == 0) match = (length == where_target);
+                else if (strcmp(op, "<") == 0) match = (length < where_target);
+                else if (strcmp(op, ">") == 0) match = (length > where_target);
+                else if (strcmp(op, "!=") == 0) match = (length != where_target);
+            }
+
+            if (match) {
+                memset(buf + off, 0, RECORD_SIZE);
+                dirty = 1;
+            }
         }
 
-        char idstr[5] = {0};
-        char lengthstr[9] = {0};
-        strncpy(idstr, buf, 4);
-        strncpy(lengthstr, buf + 34, 8);
-
-        int id = atoi(idstr);
-        int length = atoi(lengthstr);
-
-        int match = 0;
-        if (strcmp(where_field, "id") == 0) {
-            if (strcmp(op, "=") == 0) match = (id == where_target);
-            else if (strcmp(op, "<") == 0) match = (id < where_target);
-            else if (strcmp(op, ">") == 0) match = (id > where_target);
-            else if (strcmp(op, "!=") == 0) match = (id != where_target);
-        } else if (strcmp(where_field, "length") == 0) {
-            if (strcmp(op, "=") == 0) match = (length == where_target);
-            else if (strcmp(op, "<") == 0) match = (length < where_target);
-            else if (strcmp(op, ">") == 0) match = (length > where_target);
-            else if (strcmp(op, "!=") == 0) match = (length != where_target);
-        }
-
-        if (match) {
-            // set block to 0
-            memset(buf, 0, sizeof(buf));
-            write_block(datafile, b, buf);
-        }
-
-        b++;
+        if (dirty) write_block(datafile, b, buf);
     }
 
     printf("<p>Deleted matching rows in <b>%s</b></p>\n", tbl);
 }
+
