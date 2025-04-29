@@ -30,4 +30,4 @@ sql.cgi: $(SQL_OBJS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	-rm -f *.o wserver wclient spin.cgi sql.cgi movies.schema movies.data
+	-rm -f *.o wserver wclient spin.cgi sql.cgi schema.db movies.data

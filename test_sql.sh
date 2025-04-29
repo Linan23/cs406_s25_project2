@@ -96,19 +96,19 @@ check "ERROR: no columns specified" "CREATE TABLE blank()"
 
 # INSERT broken tests
 check "ERROR: table <b>nosuch</b> does not exist" "INSERT INTO nosuch VALUES(1,X)"
-check "ERROR: bad INSERT values" "INSERT INTO movies VALUES(1Avatar)"
-check "ERROR: bad INSERT values" "INSERT INTO movies VALUES(,Avatar)"
+check "ERROR: expected 3 values, got 1" "INSERT INTO movies VALUES(1Avatar)"
+check "ERROR: expected 3 values, got 2" "INSERT INTO movies VALUES(,Avatar)"
 
 # Comma/field/spacing error tests
-check "ERROR: bad INSERT values" "INSERT INTO movies VALUES(1,Avatar,162,999)"
-check "ERROR: bad INSERT values" "INSERT INTO movies VALUES(1 Avatar 162)"
-check "ERROR: bad INSERT values" "INSERT INTO movies VALUES(1,Avatar,162,)"
-check "ERROR: bad INSERT values" "INSERT INTO movies VALUES(,1,Avatar,162)"
-check "ERROR: bad INSERT values" "INSERT INTO movies VALUES(1,Avatar)"
-check "ERROR: bad INSERT values" "INSERT INTO movies VALUES(1)"
+check "ERROR: expected 3 values, got 4" "INSERT INTO movies VALUES(1,Avatar,162,999)"
+check "ERROR: expected 3 values, got 1" "INSERT INTO movies VALUES(1 Avatar 162)"
+check "ERROR: expected 3 values, got 4" "INSERT INTO movies VALUES(1,Avatar,162,)"
+check "ERROR: expected 3 values, got 4" "INSERT INTO movies VALUES(,1,Avatar,162)"
+check "ERROR: expected 3 values, got 2" "INSERT INTO movies VALUES(1,Avatar)"
+check "ERROR: expected 3 values, got 1" "INSERT INTO movies VALUES(1)"
 check "ERROR: bad INSERT syntax" "INSERT INTO movies VALUES()"
 check "ERROR: bad INSERT syntax" "INSERT INTO movies VALUES 1 Avatar 162"
-check "ERROR: bad INSERT values" "INSERT INTO movies VALUES(1,,Avatar,162)"
+check "ERROR: expected 3 values, got 4" "INSERT INTO movies VALUES(1,,Avatar,162)"
 check "ERROR: bad INSERT values" "INSERT INTO movies VALUES('1','Avatar','162')"
 
 # SELECT broken tests

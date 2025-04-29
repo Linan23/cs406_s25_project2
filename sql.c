@@ -7,17 +7,42 @@
 #include "blockio.h"
 #include <ctype.h>
 
+#define SCHEMA_FILE "schema.db"
 #define MAXQS 8192
 #define MAXSQL 1024
 #define MAXTOK 256
 
 #define RECORD_SIZE 43
 
+
 void handle_create(char *qs);
 void handle_insert(char *qs);
 void handle_select(char *qs);
 void handle_update(char *qs);
 void handle_delete(char *qs);
+
+// helper function to load into the schema
+int load_schema_from_file(const char *tbl, char *out, size_t outsize) {
+    FILE *fp = fopen(SCHEMA_FILE, "r");
+    if (!fp) return 0;
+
+    char line[512];
+    while (fgets(line, sizeof(line), fp)) {
+        if (strncmp(line, tbl, strlen(tbl)) == 0 && line[strlen(tbl)] == '|') {
+            char *schema_part = strchr(line, '|');
+            if (schema_part) {
+                strncpy(out, schema_part + 1, outsize);
+                char *semi = strchr(out, ';');
+                if (semi) *semi = '\0'; // chop off semicolon
+                fclose(fp);
+                return 1;
+            }
+        }
+    }
+    fclose(fp);
+    return 0; // not found
+}
+
 
 void url_decode(char *dst, const char *src)
 {
@@ -92,7 +117,7 @@ int main()
     return 0;
 }
 
-// CREATE TABLE 
+// CREATE TABLE
 void handle_create(char *qs)
 {
     char tbl[64], cols[512];
@@ -223,22 +248,33 @@ void handle_create(char *qs)
     }
 
     // Check table existence
-    char schemafile[80];
-    snprintf(schemafile, sizeof(schemafile), "%s.schema", tbl);
-    struct stat st;
-    if (stat(schemafile, &st) == 0)
+
+    FILE *fp = fopen(SCHEMA_FILE, "r");
+    if (fp)
     {
-        printf("<p>ERROR: table <b>%s</b> already exists</p>\n", tbl);
-        return;
+        char line[512];
+        while (fgets(line, sizeof(line), fp))
+        {
+            if (strncmp(line, tbl, strlen(tbl)) == 0 && line[strlen(tbl)] == '|')
+            {
+                printf("<p>ERROR: table <b>%s</b> already exists</p>\n", tbl);
+                fclose(fp);
+                return;
+            }
+        }
+        fclose(fp);
     }
 
-    // Pack and store table(schema)
-    char buf[256] = {0};
-    snprintf(buf, sizeof(buf), "%s|%s;", tbl, cols);
+    // Parse the table into the schema, create a data file for table
 
-    int b = alloc_block(schemafile);
-    write_block(schemafile, b, buf);
-    set_next_block(schemafile, b, -1);
+    FILE *out = fopen(SCHEMA_FILE, "a");
+    if (!out)
+    {
+        printf("<p>ERROR: could not open schema file</p>\n");
+        return;
+    }
+    fprintf(out, "%s|%s;\n", tbl, cols);
+    fclose(out);
 
     printf("<p>Created table <b>%s</b></p>\n", tbl);
 
@@ -250,12 +286,22 @@ void handle_create(char *qs)
 
 // Insert
 
-void handle_insert(char *qs) {
+void handle_insert(char *qs)
+{
     char tbl[64], vals[512];
 
     // parse input
-    if (sscanf(qs, "INSERT INTO %63[^ ] VALUES(%511[^)])", tbl, vals) != 2) {
+    if (sscanf(qs, "INSERT INTO %63[^ ] VALUES(%511[^)])", tbl, vals) != 2)
+    {
         printf("<p>ERROR: bad INSERT syntax</p>\n");
+        return;
+    }
+
+    // check schema
+    char schema[512];
+    if (!load_schema_from_file(tbl, schema, sizeof(schema)))
+    {
+        printf("<p>ERROR: table <b>%s</b> does not exist</p>\n", tbl);
         return;
     }
 
@@ -263,25 +309,37 @@ void handle_insert(char *qs) {
     char datafile[80];
     snprintf(datafile, sizeof(datafile), "%s.data", tbl);
     struct stat st;
-    if (stat(datafile, &st) < 0) {
+    if (stat(datafile, &st) < 0)
+    {
         printf("<p>ERROR: table <b>%s</b> does not exist</p>\n", tbl);
         return;
     }
 
-    // check field count, should only be 2 commas for 3 values
-    int commas = 0;
-    for (char *p = vals; *p; p++) {
-        if (*p == ',') commas++;
+    // check value count matches schema column count
+    int expected_fields = 1;
+    for (char *p = schema; *p; p++)
+    {
+        if (*p == ',') expected_fields++;
     }
-    if (commas != 2) {
-        printf("<p>ERROR: bad INSERT values</p>\n");
+
+    int provided_fields = 1;
+    for (char *p = vals; *p; p++)
+    {
+        if (*p == ',') provided_fields++;
+    }
+
+    if (provided_fields != expected_fields)
+    {
+        printf("<p>ERROR: expected %d values, got %d</p>\n", expected_fields, provided_fields);
         return;
     }
 
-    // parse fields
+    // parse fields, id: 4byte integer,title:char(n),length: 8 byte integer
     int id, length;
     char title[128];
-    if (sscanf(vals, "%d,%127[^,],%d", &id, title, &length) != 3) {
+
+    if (sscanf(vals, "%d,%127[^,],%d", &id, title, &length) != 3)
+    {
         printf("<p>ERROR: bad INSERT values</p>\n");
         return;
     }
@@ -305,12 +363,15 @@ void handle_insert(char *qs) {
     // scan blocks for empty spot
     int nblocks = st.st_size / BLOCK_SIZE;
     int written = 0;
-    for (int b = 1; b < nblocks; b++) {
+    for (int b = 1; b < nblocks; b++)
+    {
         char buf[BLOCK_SIZE];
         read_block(datafile, b, buf);
 
-        for (int off = 0; off + RECORD_SIZE <= BLOCK_SIZE; off += RECORD_SIZE) {
-            if (buf[off] == '\0') {
+        for (int off = 0; off + RECORD_SIZE <= BLOCK_SIZE; off += RECORD_SIZE)
+        {
+            if (buf[off] == '\0')
+            {
                 memcpy(buf + off, record, RECORD_SIZE);
                 write_block(datafile, b, buf);
                 written = 1;
@@ -320,8 +381,9 @@ void handle_insert(char *qs) {
         if (written) break;
     }
 
-    // if no space, allocate a new block
-    if (!written) {
+    // if no space, allocate new block
+    if (!written)
+    {
         int b = alloc_block(datafile);
         char buf[BLOCK_SIZE] = {0};
         memcpy(buf, record, RECORD_SIZE);
@@ -333,32 +395,40 @@ void handle_insert(char *qs) {
 }
 
 
-
-
-
-// SELECT 
-
-void handle_select(char *qs) {
+// SELECT
+void handle_select(char *qs)
+{
     char cols[128], tbl[64], cond[128];
     char header_cols[128], data_cols[128];
 
-    if (sscanf(qs, "SELECT %127[^ ] FROM %63[^ ] WHERE %127[^\r\n]", cols, tbl, cond) != 3) {
+    if (sscanf(qs, "SELECT %127[^ ] FROM %63[^ ] WHERE %127[^\r\n]", cols, tbl, cond) != 3)
+    {
         printf("<p>ERROR: bad SELECT syntax</p>\n");
         return;
     }
 
-    if (strcmp(cols, "*") == 0) {
+    if (strcmp(cols, "*") == 0)
+    {
         strcpy(cols, "id,title,length");
     }
 
     strncpy(header_cols, cols, sizeof(header_cols));
-    strncpy(data_cols,   cols, sizeof(data_cols));
+    strncpy(data_cols, cols, sizeof(data_cols));
 
-    for (char *p = tbl; *p; p++) {
-        if (!isalnum((unsigned char)*p) && *p != '_') {
+    for (char *p = tbl; *p; p++)
+    {
+        if (!isalnum((unsigned char)*p) && *p != '_')
+        {
             printf("<p>ERROR: invalid table name</p>\n");
             return;
         }
+    }
+
+    // load schema and check datafile existence
+    char schema[512];
+    if (!load_schema_from_file(tbl, schema, sizeof(schema))) {
+        printf("<p>ERROR: table <b>%s</b> does not exist</p>\n", tbl);
+        return;
     }
 
     char datafile[80];
@@ -369,21 +439,60 @@ void handle_select(char *qs) {
         return;
     }
 
-    printf("<table><tr>");
-    char *col = strtok(header_cols, ",");
+    // validate selected columns exist in schema
+    char schema_copy[512];
+    strncpy(schema_copy, schema, sizeof(schema_copy));
+    char *valid_fields[16];
+    int fcount = 0;
+    char *tok = strtok(schema_copy, ",");
+    while (tok && fcount < 16) {
+        char *colon = strchr(tok, ':');
+        if (colon) *colon = '\0';
+        valid_fields[fcount++] = tok;
+        tok = strtok(NULL, ",");
+    }
+
+    char sel_copy[128];
+    strncpy(sel_copy, cols, sizeof(sel_copy));
+    char *col = strtok(sel_copy, ",");
     while (col) {
         while (*col == ' ') col++;
+        int found = 0;
+        for (int i = 0; i < fcount; i++) {
+            if (strcmp(col, valid_fields[i]) == 0) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            printf("<p>ERROR: unknown column '%s'</p>\n", col);
+            return;
+        }
+        col = strtok(NULL, ",");
+    }
+
+    printf("<table><tr>");
+    col = strtok(header_cols, ",");
+    while (col)
+    {
+        while (*col == ' ')
+            col++;
         printf("<th>%s</th>", col);
         col = strtok(NULL, ",");
     }
     printf("</tr>\n");
 
     char *op = NULL;
-    if (strstr(cond, "!=")) op = "!=";
-    else if (strstr(cond, "<")) op = "<";
-    else if (strstr(cond, ">")) op = ">";
-    else if (strstr(cond, "=")) op = "=";
-    else {
+    if (strstr(cond, "!="))
+        op = "!=";
+    else if (strstr(cond, "<"))
+        op = "<";
+    else if (strstr(cond, ">"))
+        op = ">";
+    else if (strstr(cond, "="))
+        op = "=";
+    else
+    {
         printf("<p>ERROR: unknown operator</p>\n");
         return;
     }
@@ -396,14 +505,17 @@ void handle_select(char *qs) {
     int where_target = atoi(value);
 
     int nblocks = st.st_size / BLOCK_SIZE;
-    for (int b = 1; b < nblocks; b++) {
+    for (int b = 1; b < nblocks; b++)
+    {
         char buf[BLOCK_SIZE];
         read_block(datafile, b, buf);
 
-        for (int offset = 0; offset + 42 <= BLOCK_SIZE; offset += 43) {
+        for (int offset = 0; offset + 42 <= BLOCK_SIZE; offset += 43)
+        {
             char idstr[5] = {0};
             strncpy(idstr, buf + offset, 4);
-            if (idstr[0] == '\0') continue;
+            if (idstr[0] == '\0')
+                continue;
 
             char titlestr[31] = {0};
             char lengthstr[9] = {0};
@@ -414,35 +526,54 @@ void handle_select(char *qs) {
             int length = atoi(lengthstr);
 
             int match = 0;
-            if      (strcmp(field, "id") == 0) {
-                if      (!strcmp(op, "="))  match = (id     == where_target);
-                else if (!strcmp(op, "<"))  match = (id     <  where_target);
-                else if (!strcmp(op, ">"))  match = (id     >  where_target);
-                else if (!strcmp(op, "!=")) match = (id     != where_target);
+            if (strcmp(field, "id") == 0)
+            {
+                if (!strcmp(op, "="))
+                    match = (id == where_target);
+                else if (!strcmp(op, "<"))
+                    match = (id < where_target);
+                else if (!strcmp(op, ">"))
+                    match = (id > where_target);
+                else if (!strcmp(op, "!="))
+                    match = (id != where_target);
             }
-            else if (strcmp(field, "length") == 0) {
-                if      (!strcmp(op, "="))  match = (length == where_target);
-                else if (!strcmp(op, "<"))  match = (length <  where_target);
-                else if (!strcmp(op, ">"))  match = (length >  where_target);
-                else if (!strcmp(op, "!=")) match = (length != where_target);
+            else if (strcmp(field, "length") == 0)
+            {
+                if (!strcmp(op, "="))
+                    match = (length == where_target);
+                else if (!strcmp(op, "<"))
+                    match = (length < where_target);
+                else if (!strcmp(op, ">"))
+                    match = (length > where_target);
+                else if (!strcmp(op, "!="))
+                    match = (length != where_target);
             }
 
-            if (!match) continue;
+            if (!match)
+                continue;
 
-            for (int i = strlen(titlestr) - 1; i >= 0; i--) {
-                if (titlestr[i] == ' ') titlestr[i] = '\0';
-                else break;
+            for (int i = strlen(titlestr) - 1; i >= 0; i--)
+            {
+                if (titlestr[i] == ' ')
+                    titlestr[i] = '\0';
+                else
+                    break;
             }
 
             printf("<tr>");
             char data_cols_copy[128];
             strncpy(data_cols_copy, data_cols, sizeof(data_cols_copy));
             col = strtok(data_cols_copy, ",");
-            while (col) {
-                while (*col == ' ') col++;
-                if      (!strcmp(col, "id"))     printf("<td>%d</td>", id);
-                else if (!strcmp(col, "title"))  printf("<td>%s</td>", titlestr);
-                else if (!strcmp(col, "length")) printf("<td>%d</td>", length);
+            while (col)
+            {
+                while (*col == ' ')
+                    col++;
+                if (!strcmp(col, "id"))
+                    printf("<td>%d</td>", id);
+                else if (!strcmp(col, "title"))
+                    printf("<td>%s</td>", titlestr);
+                else if (!strcmp(col, "length"))
+                    printf("<td>%d</td>", length);
                 col = strtok(NULL, ",");
             }
             printf("</tr>\n");
@@ -451,18 +582,52 @@ void handle_select(char *qs) {
     printf("</table>\n");
 }
 
-// UPDATE 
 
-void handle_update(char *qs) {
+// UPDATE
+
+void handle_update(char *qs)
+{
     char tbl[64], setp[128], cond[128];
-    if (sscanf(qs, "UPDATE %63s SET %127[^ ] WHERE %127[^\r\n]", tbl, setp, cond) != 3) {
+    if (sscanf(qs, "UPDATE %63s SET %127[^ ] WHERE %127[^\r\n]", tbl, setp, cond) != 3)
+    {
         printf("<p>ERROR: bad UPDATE syntax</p>\n");
         return;
     }
 
     char field[64], newval[128];
-    if (sscanf(setp, "%63[^=]=%127s", field, newval) != 2) {
+    if (sscanf(setp, "%63[^=]=%127s", field, newval) != 2)
+    {
         printf("<p>ERROR: bad SET syntax</p>\n");
+        return;
+    }
+
+    char schema[512];
+    if (!load_schema_from_file(tbl, schema, sizeof(schema))) {
+        printf("<p>ERROR: table <b>%s</b> does not exist</p>\n", tbl);
+        return;
+    }
+
+    char schema_copy[512];
+    strncpy(schema_copy, schema, sizeof(schema_copy));
+    char *valid_fields[16];
+    int fcount = 0;
+    char *tok = strtok(schema_copy, ",");
+    while (tok && fcount < 16) {
+        char *colon = strchr(tok, ':');
+        if (colon) *colon = '\0';
+        valid_fields[fcount++] = tok;
+        tok = strtok(NULL, ",");
+    }
+
+    int valid = 0;
+    for (int i = 0; i < fcount; i++) {
+        if (strcmp(field, valid_fields[i]) == 0) {
+            valid = 1;
+            break;
+        }
+    }
+    if (!valid) {
+        printf("<p>ERROR: unknown column '%s'</p>\n", field);
         return;
     }
 
@@ -475,18 +640,23 @@ void handle_update(char *qs) {
     }
 
     char *op = NULL;
-    if (strstr(cond, "!=")) op = "!=";
-    else if (strstr(cond, "<")) op = "<";
-    else if (strstr(cond, ">")) op = ">";
-    else if (strstr(cond, "=")) op = "=";
-    else {
+    if (strstr(cond, "!="))
+        op = "!=";
+    else if (strstr(cond, "<"))
+        op = "<";
+    else if (strstr(cond, ">"))
+        op = ">";
+    else if (strstr(cond, "="))
+        op = "=";
+    else
+    {
         printf("<p>ERROR: unknown operator</p>\n");
         return;
     }
 
     char where_field[64], where_value[64];
     if (strcmp(op, "!=") == 0)
-        sscanf(cond, "%63[^!]!=" "%63s", where_field, where_value);
+        sscanf(cond, "%63[^!]!=%63s", where_field, where_value);
     else
         sscanf(cond, "%63[^<>=]%*c%63s", where_field, where_value);
 
@@ -496,8 +666,8 @@ void handle_update(char *qs) {
     for (int b = 1; b < nblocks; b++) {
         char buf[BLOCK_SIZE];
         read_block(datafile, b, buf);
-
         int dirty = 0;
+
         for (int offset = 0; offset + 42 <= BLOCK_SIZE; offset += 43) {
             char idstr[5] = {0};
             strncpy(idstr, buf + offset, 4);
@@ -512,16 +682,15 @@ void handle_update(char *qs) {
             int length = atoi(lengthstr);
 
             int match = 0;
-            if      (strcmp(where_field, "id") == 0) {
-                if      (!strcmp(op, "="))  match = (id     == where_target);
-                else if (!strcmp(op, "<"))  match = (id     <  where_target);
-                else if (!strcmp(op, ">"))  match = (id     >  where_target);
-                else if (!strcmp(op, "!=")) match = (id     != where_target);
-            }
-            else if (strcmp(where_field, "length") == 0) {
-                if      (!strcmp(op, "="))  match = (length == where_target);
-                else if (!strcmp(op, "<"))  match = (length <  where_target);
-                else if (!strcmp(op, ">"))  match = (length >  where_target);
+            if (strcmp(where_field, "id") == 0) {
+                if (!strcmp(op, "=")) match = (id == where_target);
+                else if (!strcmp(op, "<")) match = (id < where_target);
+                else if (!strcmp(op, ">")) match = (id > where_target);
+                else if (!strcmp(op, "!=")) match = (id != where_target);
+            } else if (strcmp(where_field, "length") == 0) {
+                if (!strcmp(op, "=")) match = (length == where_target);
+                else if (!strcmp(op, "<")) match = (length < where_target);
+                else if (!strcmp(op, ">")) match = (length > where_target);
                 else if (!strcmp(op, "!=")) match = (length != where_target);
             }
 
@@ -551,21 +720,26 @@ void handle_update(char *qs) {
     printf("<p>Update done on <b>%s</b></p>\n", tbl);
 }
 
+// DELETE
 
-
-// DELETE 
-
-void handle_delete(char *qs) {
+void handle_delete(char *qs)
+{
     char tbl[64], cond[128];
 
-    if (sscanf(qs, "DELETE FROM %63s WHERE %127[^\r\n]", tbl, cond) != 2) {
+    if (sscanf(qs, "DELETE FROM %63s WHERE %127[^\r\n]", tbl, cond) != 2)
+    {
         printf("<p>ERROR: bad DELETE syntax</p>\n");
+        return;
+    }
+
+    char schema[512];
+    if (!load_schema_from_file(tbl, schema, sizeof(schema))) {
+        printf("<p>ERROR: table <b>%s</b> does not exist</p>\n", tbl);
         return;
     }
 
     char datafile[80];
     snprintf(datafile, sizeof(datafile), "%s.data", tbl);
-
     struct stat st;
     if (stat(datafile, &st) < 0) {
         printf("<p>ERROR: table <b>%s</b> does not exist</p>\n", tbl);
@@ -573,11 +747,16 @@ void handle_delete(char *qs) {
     }
 
     char *op = NULL;
-    if (strstr(cond, "!=")) op = "!=";
-    else if (strstr(cond, "<")) op = "<";
-    else if (strstr(cond, ">")) op = ">";
-    else if (strstr(cond, "=")) op = "=";
-    else {
+    if (strstr(cond, "!="))
+        op = "!=";
+    else if (strstr(cond, "<"))
+        op = "<";
+    else if (strstr(cond, ">"))
+        op = ">";
+    else if (strstr(cond, "="))
+        op = "=";
+    else
+    {
         printf("<p>ERROR: unknown operator</p>\n");
         return;
     }
@@ -609,15 +788,15 @@ void handle_delete(char *qs) {
 
             int match = 0;
             if (strcmp(where_field, "id") == 0) {
-                if (strcmp(op, "=") == 0) match = (id == where_target);
-                else if (strcmp(op, "<") == 0) match = (id < where_target);
-                else if (strcmp(op, ">") == 0) match = (id > where_target);
-                else if (strcmp(op, "!=") == 0) match = (id != where_target);
+                if (!strcmp(op, "=")) match = (id == where_target);
+                else if (!strcmp(op, "<")) match = (id < where_target);
+                else if (!strcmp(op, ">")) match = (id > where_target);
+                else if (!strcmp(op, "!=")) match = (id != where_target);
             } else if (strcmp(where_field, "length") == 0) {
-                if (strcmp(op, "=") == 0) match = (length == where_target);
-                else if (strcmp(op, "<") == 0) match = (length < where_target);
-                else if (strcmp(op, ">") == 0) match = (length > where_target);
-                else if (strcmp(op, "!=") == 0) match = (length != where_target);
+                if (!strcmp(op, "=")) match = (length == where_target);
+                else if (!strcmp(op, "<")) match = (length < where_target);
+                else if (!strcmp(op, ">")) match = (length > where_target);
+                else if (!strcmp(op, "!=")) match = (length != where_target);
             }
 
             if (match) {
@@ -631,4 +810,3 @@ void handle_delete(char *qs) {
 
     printf("<p>Deleted matching rows in <b>%s</b></p>\n", tbl);
 }
-

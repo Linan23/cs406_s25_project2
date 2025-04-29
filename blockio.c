@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdint.h>
 #include <fcntl.h>
 #include "io_helper.h"
 #include "blockio.h"
@@ -45,8 +46,6 @@ void free_block(const char *filename, int blocknum) {
     close_or_die(fd);
 }
 
-
-#include <stdint.h>
 
 // write the next‐block index into the last 4 bytes of block
 void set_next_block(const char *file, int blocknum, int32_t next) {
