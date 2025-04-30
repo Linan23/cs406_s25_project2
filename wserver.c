@@ -35,7 +35,7 @@ int main(int argc, char *argv[]) {
 
     // now, get to work
     int listen_fd = open_listen_fd_or_die(port);
-    printf("DEBUG [%d]: requested port %d, actually listening on port %d\n",
+    printf("Requested port %d, actually listening on port %d\n", // Debugger to make sure we're on the correct server(port)
       getpid(), port, port);
       fflush(stdout);
       

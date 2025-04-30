@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define BLOCK_SIZE 256
+#define BLOCK_SIZE 256 // Each block is 256 bytes
 
 int alloc_block(const char *filename);
 void read_block(const char *filename, int blocknum, char buf[BLOCK_SIZE]);
