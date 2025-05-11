@@ -1,7 +1,8 @@
 .PHONY: all clean
 
 CC       = gcc
-CFLAGS   = -Wall
+CFLAGS   = -Wall -Wextra -pthread
+LDFLAGS  = -pthread
 
 # Object files for each program
 OBJS     = wserver.o request.o io_helper.o
@@ -13,8 +14,13 @@ SQL_OBJS = sql.o blockio.o io_helper.o
 # Build all programs
 all: wserver wclient spin.cgi sql.cgi
 
+# Run the smoke tests after building
+test: all
+	bash ./test_server.sh
+
+
 wserver: $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $(OBJS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS)
 
 wclient: $(COBJS)
 	$(CC) $(CFLAGS) -o $@ $(COBJS)

@@ -1,1 +1,0 @@
-movies|id:smallint,title:char(20),length:integer;

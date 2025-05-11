@@ -1,0 +1,10 @@
+[pid 1411151] listening on port 10000, root "."
+[master] enqueued fd=4 size=17240 count=1 head=0 tail=1
+[worker] SFF branch entered (schedalg="SFF")
+[worker] dequeued fd=4 size=17240 head=1 tail=1 count=0
+[master] enqueued fd=5 size=6 count=1 head=1 tail=2
+[master] enqueued fd=6 size=2097152 count=2 head=1 tail=0
+[worker] SFF branch entered (schedalg="SFF")
+[worker] dequeued fd=5 size=6 head=2 tail=0 count=1
+[worker] SFF branch entered (schedalg="SFF")
+[worker] dequeued fd=6 size=2097152 head=0 tail=0 count=0
