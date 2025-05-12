@@ -17,8 +17,6 @@ all: wserver wclient spin.cgi sql.cgi
 # Run the smoke tests after building
 test: all
 	bash ./test_server.sh
-
-
 wserver: $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS)
 

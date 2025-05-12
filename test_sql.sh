@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-# base url we are using(port 8888)
-BASE="http://localhost:8888/sql.cgi?"
+# base url we are using(port 15000)
+BASE="http://localhost:15000/sql.cgi?"
 
 
 # Function to URL encode query strings

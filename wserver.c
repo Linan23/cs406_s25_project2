@@ -1,11 +1,4 @@
-// wserver.c — multi‐threaded HTTP server with FIFO/SFF scheduling
-// Usage: ./wserver [-d basedir] [-p port] [-t threads>0] [-b buffers>0] [-s FIFO|SFF]
-//   Master thread: accept() → peek+stat for SFF → enqueue
-//   Worker threads: dequeue (FIFO or smallest‐first) → request_handle()
-//   Signal handler: on SIGINT/SIGTERM sets stop, closes listen_fd, wakes workers
-
 #define _POSIX_C_SOURCE 200809L
-
 #include <stdio.h>
 #include <stdlib.h> // for atoi(), exit()
 #include <unistd.h> // for getopt(), optarg, getpid()
